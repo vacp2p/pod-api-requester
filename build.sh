@@ -1,2 +1,8 @@
-docker build -t <your-registry>/get_store_messages:v1.0.0 .
-docker push <your-registry>/get_store_messages:v1.0.0
+docker build -t <your-registry>/pod-api-requester:<tag> --target debug .
+# or
+docker build -t <your-registry>/pod-api-requester:<tag> --target production .
+# The default build is production
+docker build -t <your-registry>/pod-api-requester:<tag>
+
+
+docker push <your-registry>/pod-api-requester:<tag>
