@@ -22,6 +22,8 @@ logger = setup_logger(__file__)
 
 app = FastAPI()
 
+class TargetNotFoundError(LookupError):
+    """Raised when no target matches the given criteria."""
 
 class TargetPodInfo(BaseModel):
     model_config = ConfigDict(arbitrary_types_allowed=True)
@@ -265,13 +267,16 @@ def create_app(config) -> FastAPI:
             request = ConfigRequest(
                 name="dummy_request", endpoint=endpoint, retries=0, retry_delay=0
             )
-            pod_info = next(iter(get_pod_infos([target])))
+            try:
+                pod_info = next(iter(get_pod_infos([target])))
+            except IndexError as e:
+                raise TargetNotFoundError(f"Target not found. Target: {target}") from e
             result = call_endpoint(request.endpoint, pod_info)
             return result
         except Exception as e:
             # TODO: Add hints to errors (eg. Action doesn't exist, etc)
             logger.error(HTTPException(status_code=500, detail=f"{e!r}\n{traceback.format_exc()}"))
-            raise HTTPException(status_code=500, detail=f"{e!r}\n{traceback.format_exc()}")
+            raise HTTPException(status_code=500, detail=f"{e!r}\n{traceback.format_exc()}") from e
 
     return app
 
