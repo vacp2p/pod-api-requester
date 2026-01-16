@@ -22,8 +22,10 @@ logger = setup_logger(__file__)
 
 app = FastAPI()
 
-class TargetNotFoundError(LookupError):
-    """Raised when no target matches the given criteria."""
+class NotFoundError(LookupError):
+    """Raised when no object matches the given criteria.
+
+    For example specifying a target name that does not exist in the ConfigMap."""
 
 class TargetPodInfo(BaseModel):
     model_config = ConfigDict(arbitrary_types_allowed=True)
@@ -222,7 +224,7 @@ def create_app(config) -> FastAPI:
     app = FastAPI()
 
     async def get_config():
-        logger.info(f"todo get config: {config}")
+        logger.info(f"get_config: {config}")
         return config
 
     class InvokeRequestData(BaseModel):
@@ -252,15 +254,20 @@ def create_app(config) -> FastAPI:
             response = requests.post(url, json=data)
         """
         try:
+            # TODO: simplify logic
             try:
                 # Treat target as the name of a preset target from config.
                 target = config["targets"][data.target]
+            except KeyError as e:
+                raise NotFoundError(f"Target not found. Target: {data.target}") from e
             except TypeError:
                 # If no target with that name exists, treat as custom target.
                 target = data.target
             try:
                 # Treat endpoint as the name of preset endpoint from config.
                 endpoint = config["endpoints"][data.endpoint]
+            except KeyError as e:
+                raise NotFoundError(f"Endpoint not found. Endpoint: {data.endpoint}")
             except TypeError:
                 # If no endpoint with that name exists, treat as custom endpoint.
                 endpoint = data.endpoint
@@ -269,8 +276,8 @@ def create_app(config) -> FastAPI:
             )
             try:
                 pod_info = next(iter(get_pod_infos([target])))
-            except IndexError as e:
-                raise TargetNotFoundError(f"Target not found. Target: {target}") from e
+            except StopIteration as e:
+                raise NotFoundError(f"Target not found. Target: {target}") from e
             result = call_endpoint(request.endpoint, pod_info)
             return result
         except Exception as e:
