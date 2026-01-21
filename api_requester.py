@@ -4,7 +4,7 @@ import traceback
 from argparse import Namespace
 from collections import defaultdict
 from pathlib import Path
-from typing import Dict, List
+from typing import Annotated, Dict, List, Literal, Union
 
 import requests
 import uvicorn
@@ -12,15 +12,10 @@ import yaml
 from fastapi import Depends, FastAPI, HTTPException
 from kubernetes import client, config
 from kubernetes.client.models.v1_pod import V1Pod
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field
 
 from configs import ConfigAction, ConfigEndpoint, ConfigRequest, ConfigTarget
 from utils import paged_request, setup_logger
-
-logger = setup_logger(__file__)
-
-
-app = FastAPI()
 
 
 class TargetPodInfo(BaseModel):
@@ -32,6 +27,18 @@ class TargetPodInfo(BaseModel):
     @property
     def pod_name(self) -> str:
         return self.pod.metadata.name
+
+
+logger = setup_logger(__file__)
+
+
+app = FastAPI()
+
+
+class NotFoundError(LookupError):
+    """Raised when no object matches the given criteria.
+
+    For example specifying a target name that does not exist in the ConfigMap."""
 
 
 def do_request(request: ConfigRequest, pod_info: TargetPodInfo):
@@ -219,13 +226,29 @@ def get_pod_infos(targets: List[ConfigTarget]) -> List[TargetPodInfo]:
 def create_app(config) -> FastAPI:
     app = FastAPI()
 
-    async def get_config():
-        logger.info(f"todo get config: {config}")
+    async def get_config() -> dict:
+        logger.debug(f"get_config: {config}")
         return config
 
+    class TargetConfig(BaseModel):
+        kind: Literal["config"]
+        value: ConfigTarget
+
+    class TargetName(BaseModel):
+        kind: Literal["name"]
+        value: str
+
+    class EndpointConfig(BaseModel):
+        kind: Literal["config"]
+        value: ConfigEndpoint
+
+    class EndpointName(BaseModel):
+        kind: Literal["name"]
+        value: str
+
     class InvokeRequestData(BaseModel):
-        target: ConfigTarget | str
-        endpoint: ConfigEndpoint | str
+        target: Annotated[Union[TargetName, TargetConfig], Field(discriminator="kind")]
+        endpoint: Annotated[Union[EndpointName, EndpointConfig], Field(discriminator="kind")]
 
     @app.post("/process")
     # TODO: Implement try/catch return error in decorator. It will be the same for all endpoints.
@@ -249,31 +272,36 @@ def create_app(config) -> FastAPI:
             url = f"http://{external_ip}:{node_port}/process"
             response = requests.post(url, json=data)
         """
+
+        def unwrap_arg(arg, key):
+            if isinstance(arg.value, str):
+                try:
+                    # Treat as the name of a from config.
+                    return config[key][arg.value]
+                except KeyError as e:
+                    raise NotFoundError(
+                        f"Config object not found. Key: `{key}` Target: `{arg}`"
+                    ) from e
+            else:
+                # Treat as custom config.
+                return arg.value
+
         try:
-            try:
-                # Treat target as the name of a preset target from config.
-                target = config["targets"][data.target]
-            except TypeError:
-                # If no target with that name exists, treat as custom target.
-                target = data.target
-            try:
-                # Treat endpoint as the name of preset endpoint from config.
-                endpoint = config["endpoints"][data.endpoint]
-            except TypeError:
-                # If no endpoint with that name exists, treat as custom endpoint.
-                endpoint = data.endpoint
+            target = unwrap_arg(data.target, "targets")
+            endpoint = unwrap_arg(data.endpoint, "endpoints")
+
             request = ConfigRequest(
                 name="dummy_request", endpoint=endpoint, retries=0, retry_delay=0
             )
-            pod_info = next(iter(get_pod_infos([target])))
+            try:
+                pod_info = next(iter(get_pod_infos([target])))
+            except StopIteration as e:
+                raise NotFoundError(f"Target not found. Target: {target}") from e
             result = call_endpoint(request.endpoint, pod_info)
             return result
         except Exception as e:
-            # TODO: Add hints to errors (eg. Action doesn't exist, etc)
             logger.error(HTTPException(status_code=500, detail=f"{e!r}\n{traceback.format_exc()}"))
-            raise HTTPException(status_code=500, detail=f"{e!r}\n{traceback.format_exc()}")
-
-    return app
+            raise HTTPException(status_code=500, detail=f"{e!r}\n{traceback.format_exc()}") from e
 
 
 def main(args: Namespace):
