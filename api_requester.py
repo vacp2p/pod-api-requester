@@ -1,88 +1,20 @@
 import argparse
 import random
-import traceback
 from argparse import Namespace
 from collections import defaultdict
 from pathlib import Path
-from typing import Annotated, Dict, List, Literal, Optional, Union
+from typing import Dict, List
 
-import requests
 import uvicorn
 import yaml
-from fastapi import Depends, FastAPI, HTTPException
-from kubernetes.client.models.v1_pod import V1Pod
-from pydantic import BaseModel, ConfigDict, Field
 
+from app import create_app
+from common import call_endpoint, get_pod_infos
 from configs import ConfigAction, ConfigEndpoint, ConfigRequest, ConfigTarget
-from kube_client import core_v1
-from utils import paged_request, setup_logger
+from schemas import TargetPodInfo
+from utils import setup_logger
 
 logger = setup_logger(__file__)
-
-
-class TargetPodInfo(BaseModel):
-    model_config = ConfigDict(arbitrary_types_allowed=True)
-
-    config_target: ConfigTarget
-    pod: V1Pod
-
-    @property
-    def pod_name(self) -> str:
-        return self.pod.metadata.name
-
-
-class NotFoundError(LookupError):
-    """Raised when no object matches the given criteria.
-
-    For example specifying a target name that does not exist in the ConfigMap."""
-
-
-def do_request(request: ConfigRequest, pod_info: TargetPodInfo):
-    raise NotImplementedError()
-
-
-def call_endpoint(endpoint: ConfigEndpoint, pod_info: TargetPodInfo) -> dict:
-    result_data = {"request": {"configEndpoint": endpoint}}
-    request_data = {"params": endpoint.params, "headers": endpoint.headers}
-
-    try:
-        request_data["url"] = endpoint.url.format(
-            node=pod_info.pod.status.pod_ip, port=pod_info.config_target.port
-        )
-        request_data["pod"] = f"{pod_info.pod.metadata.name}"
-        logger.info(f"request_data: {request_data}")
-
-        if endpoint.paged:
-            if endpoint.type != "GET":
-                raise NotImplementedError("Paged requests only implemented for GET requests.")
-            result = paged_request(request=request_data, max_attempts=1, page_request_delay=0)
-        else:
-            if endpoint.type == "POST":
-                result = requests.post(
-                    request_data["url"],
-                    json=request_data["params"],
-                    headers=request_data["headers"],
-                )
-            elif endpoint.type == "GET":
-                result = requests.post(
-                    request_data["url"],
-                    json=request_data["params"],
-                    headers=request_data["headers"],
-                )
-            else:
-                raise AttributeError(f"Unknown request type. request: `{endpoint}`")
-
-        result_data["request"].update(request_data)
-        result_data["response"] = {"status_code": result.status_code, "text": result.text}
-    except Exception as e:
-        error = traceback.format_exc()
-        logger.error(
-            f"Exception attempting API request. endpoint: `{endpoint}`, exception: `{e}`, error: `{error}`"
-        )
-        result_data["exception"] = error
-
-    logger.info(result_data)
-    return result_data
 
 
 def assert_unique_attr(objects: List[object], attribute: str):
@@ -102,23 +34,6 @@ def assert_unique_attr(objects: List[object], attribute: str):
         f"Duplicate attributes: `{duplicates}`. "
         f"Objects: `{objects}`"
     )
-
-
-def get_pods_for_target(target: ConfigTarget, *, namespace: Optional[str] = None) -> List[str]:
-    if not namespace:
-        namespace = (
-            open("/var/run/secrets/kubernetes.io/serviceaccount/namespace").read() or "default"
-        )
-
-    if target.service:
-        pods = core_v1.list_namespaced_pod(namespace)
-    else:
-        service = core_v1.read_namespaced_service(target.service, namespace)
-        selector = service.spec.selector
-        selector_str = ",".join([f"{k}={v}" for k, v in selector.items()])
-        pods = core_v1.list_namespaced_pod(namespace, label_selector=selector_str)
-
-    return list(filter(lambda pod: target.matches(pod), pods.items))
 
 
 def parse_config(config: Dict[str, List[object]]) -> Dict[str, Dict[str, object]]:
@@ -209,102 +124,6 @@ def do_action(
                 call_endpoint(request, pod)
     else:
         raise ValueError(f"Unknown loop_order for action: {action}")
-
-
-def get_pod_infos(
-    targets: List[ConfigTarget], *, namespace: Optional[str] = None
-) -> List[TargetPodInfo]:
-    pods_info: List[TargetPodInfo] = []
-    for target in targets:
-        pods = get_pods_for_target(target, namespace=namespace)
-        for pod in pods:
-            pods_info.append(TargetPodInfo(config_target=target, pod=pod))
-    return pods_info
-
-
-def create_app(config) -> FastAPI:
-    app = FastAPI()
-
-    app.state.namespace = (
-        open("/var/run/secrets/kubernetes.io/serviceaccount/namespace").read() or "default"
-    )
-
-    async def get_config() -> dict:
-        logger.debug(f"get_config: {config}")
-        return config
-
-    class TargetConfig(BaseModel):
-        kind: Literal["config"]
-        value: ConfigTarget
-
-    class TargetName(BaseModel):
-        kind: Literal["name"]
-        value: str
-
-    class EndpointConfig(BaseModel):
-        kind: Literal["config"]
-        value: ConfigEndpoint
-
-    class EndpointName(BaseModel):
-        kind: Literal["name"]
-        value: str
-
-    class InvokeRequestData(BaseModel):
-        target: Annotated[Union[TargetName, TargetConfig], Field(discriminator="kind")]
-        endpoint: Annotated[Union[EndpointName, EndpointConfig], Field(discriminator="kind")]
-
-    @app.post("/process")
-    # TODO: Implement try/catch return error in decorator. It will be the same for all endpoints.
-    def process_data(data: InvokeRequestData, config=Depends(get_config)):
-        """
-        Performs an API request to the given endpoint on the given target.
-
-        :param data: Contains target and endpoint.
-            For each, the argument may either the name from the config,
-            or a custom object passed in as a dict.
-
-        Sample usage (from outside the cluster):
-            data = {
-                "target": {
-                    "name": "dummy",
-                    "service": "zerotesting-lightpush-client",
-                    "name_template": "lpclient-0-0",
-                },
-                "endpoint": "lightpush-publish-static-sharding",
-            }
-            url = f"http://{external_ip}:{node_port}/process"
-            response = requests.post(url, json=data)
-        """
-
-        def unwrap_arg(arg, key):
-            if isinstance(arg.value, str):
-                try:
-                    # Treat as the name of a from config.
-                    return config[key][arg.value]
-                except KeyError as e:
-                    raise NotFoundError(
-                        f"Config object not found. Key: `{key}` Target: `{arg}`"
-                    ) from e
-            else:
-                # Treat as custom config.
-                return arg.value
-
-        try:
-            target = unwrap_arg(data.target, "targets")
-            endpoint = unwrap_arg(data.endpoint, "endpoints")
-
-            request = ConfigRequest(
-                name="dummy_request", endpoint=endpoint, retries=0, retry_delay=0
-            )
-            try:
-                pod_info = next(iter(get_pod_infos([target], namespace=app.state.namespace)))
-            except StopIteration as e:
-                raise NotFoundError(f"Target not found. Target: {target}") from e
-            result = call_endpoint(request.endpoint, pod_info)
-            return result
-        except Exception as e:
-            logger.error(HTTPException(status_code=500, detail=f"{e!r}\n{traceback.format_exc()}"))
-            raise HTTPException(status_code=500, detail=f"{e!r}\n{traceback.format_exc()}") from e
 
 
 def main(args: Namespace):
