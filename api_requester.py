@@ -4,18 +4,20 @@ import traceback
 from argparse import Namespace
 from collections import defaultdict
 from pathlib import Path
-from typing import Annotated, Dict, List, Literal, Union
+from typing import Annotated, Dict, List, Literal, Optional, Union
 
 import requests
 import uvicorn
 import yaml
 from fastapi import Depends, FastAPI, HTTPException
-from kubernetes import client, config
 from kubernetes.client.models.v1_pod import V1Pod
 from pydantic import BaseModel, ConfigDict, Field
 
 from configs import ConfigAction, ConfigEndpoint, ConfigRequest, ConfigTarget
+from kube_client import core_v1
 from utils import paged_request, setup_logger
+
+logger = setup_logger(__file__)
 
 
 class TargetPodInfo(BaseModel):
@@ -27,12 +29,6 @@ class TargetPodInfo(BaseModel):
     @property
     def pod_name(self) -> str:
         return self.pod.metadata.name
-
-
-logger = setup_logger(__file__)
-
-
-app = FastAPI()
 
 
 class NotFoundError(LookupError):
@@ -108,18 +104,19 @@ def assert_unique_attr(objects: List[object], attribute: str):
     )
 
 
-def get_pods_for_target(target: ConfigTarget) -> List[str]:
-    config.load_incluster_config()
-    v1 = client.CoreV1Api()
-    namespace = open("/var/run/secrets/kubernetes.io/serviceaccount/namespace").read() or "default"
+def get_pods_for_target(target: ConfigTarget, *, namespace: Optional[str] = None) -> List[str]:
+    if not namespace:
+        namespace = (
+            open("/var/run/secrets/kubernetes.io/serviceaccount/namespace").read() or "default"
+        )
 
-    if target.service is not None:
-        pods = v1.list_namespaced_pod(namespace)
+    if target.service:
+        pods = core_v1.list_namespaced_pod(namespace)
     else:
-        service = v1.read_namespaced_service(target.service, namespace)
+        service = core_v1.read_namespaced_service(target.service, namespace)
         selector = service.spec.selector
         selector_str = ",".join([f"{k}={v}" for k, v in selector.items()])
-        pods = v1.list_namespaced_pod(namespace, label_selector=selector_str)
+        pods = core_v1.list_namespaced_pod(namespace, label_selector=selector_str)
 
     return list(filter(lambda pod: target.matches(pod), pods.items))
 
@@ -180,7 +177,7 @@ def load_configs(config_files: List[str]) -> Dict[str, Dict[str, object]]:
 def do_action(
     action: ConfigAction,
     pods: List[TargetPodInfo],
-) -> List[TargetPodInfo]:
+):
     target_names = [target.name for target in action.targets]
     possible_pods = [pod for pod in pods if pod.config_target.name in target_names]
 
@@ -214,10 +211,12 @@ def do_action(
         raise ValueError(f"Unknown loop_order for action: {action}")
 
 
-def get_pod_infos(targets: List[ConfigTarget]) -> List[TargetPodInfo]:
+def get_pod_infos(
+    targets: List[ConfigTarget], *, namespace: Optional[str] = None
+) -> List[TargetPodInfo]:
     pods_info: List[TargetPodInfo] = []
     for target in targets:
-        pods = get_pods_for_target(target)
+        pods = get_pods_for_target(target, namespace=namespace)
         for pod in pods:
             pods_info.append(TargetPodInfo(config_target=target, pod=pod))
     return pods_info
@@ -225,6 +224,10 @@ def get_pod_infos(targets: List[ConfigTarget]) -> List[TargetPodInfo]:
 
 def create_app(config) -> FastAPI:
     app = FastAPI()
+
+    app.state.namespace = (
+        open("/var/run/secrets/kubernetes.io/serviceaccount/namespace").read() or "default"
+    )
 
     async def get_config() -> dict:
         logger.debug(f"get_config: {config}")
@@ -294,7 +297,7 @@ def create_app(config) -> FastAPI:
                 name="dummy_request", endpoint=endpoint, retries=0, retry_delay=0
             )
             try:
-                pod_info = next(iter(get_pod_infos([target])))
+                pod_info = next(iter(get_pod_infos([target], namespace=app.state.namespace)))
             except StopIteration as e:
                 raise NotFoundError(f"Target not found. Target: {target}") from e
             result = call_endpoint(request.endpoint, pod_info)
@@ -343,7 +346,7 @@ def parse_args() -> argparse.Namespace:
         "--port",
         type=int,
         default=8645,
-        help="Port for the action HTTP server (default 8000)",
+        help="Port for the action HTTP server (default 8645)",
     )
 
     args = parser.parse_args()
