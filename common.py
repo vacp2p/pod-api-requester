@@ -84,4 +84,4 @@ def get_pods_for_target(target: ConfigTarget, *, namespace: Optional[str] = None
         selector_str = ",".join([f"{k}={v}" for k, v in selector.items()])
         pods = core_v1.list_namespaced_pod(namespace, label_selector=selector_str)
 
-    return list(filter(lambda pod: target.matches(pod), pods.items))
+    return list(filter(lambda pod: target.matches(pod, namespace=namespace), pods.items))

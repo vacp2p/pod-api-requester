@@ -3,9 +3,10 @@ import logging
 import re
 from typing import List, Literal, Optional
 
-from kubernetes import client
 from kubernetes.client.models.v1_pod import V1Pod
 from pydantic import BaseModel, NonNegativeFloat, NonNegativeInt, PositiveInt
+
+from kube_client import core_v1
 
 
 class UTCFormatter(logging.Formatter):
@@ -117,7 +118,7 @@ class ConfigTarget(BaseModel):
     """Port to use for requests to endpoints with this target.
     Default is 80."""
 
-    def matches(self, pod: V1Pod) -> bool:
+    def matches(self, pod: V1Pod, *, namespace: str) -> bool:
         """Check if pod is a valid target of self"""
 
         if self.stateful_set is not None:
@@ -136,11 +137,7 @@ class ConfigTarget(BaseModel):
                 return False
 
         if self.service is not None:
-            v1 = client.CoreV1Api()
-            namespace = (
-                open("/var/run/secrets/kubernetes.io/serviceaccount/namespace").read() or "default"
-            )
-            service = v1.read_namespaced_service(self.service, namespace)
+            service = core_v1.read_namespaced_service(self.service, namespace)
             selector = service.spec.selector
             if not all([pod.metadata.labels.get(key) == value for key, value in selector.items()]):
                 return False
