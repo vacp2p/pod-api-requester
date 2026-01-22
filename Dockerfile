@@ -3,7 +3,7 @@ WORKDIR /app
 
 COPY requirements.txt .
 RUN pip install --no-cache-dir --break-system-packages -r requirements.txt
-COPY api_requester.py utils.py configs.py /app/
+COPY api_requester.py utils.py configs.py kube_client.py common.py schemas.py app.py /app/
 
 FROM base AS debug
 WORKDIR /app
