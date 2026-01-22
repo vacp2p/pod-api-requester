@@ -38,7 +38,7 @@ def call_endpoint(endpoint: ConfigEndpoint, pod_info: TargetPodInfo) -> dict:
                     headers=request_data["headers"],
                 )
             elif endpoint.type == "GET":
-                result = requests.post(
+                result = requests.get(
                     request_data["url"],
                     json=request_data["params"],
                     headers=request_data["headers"],
