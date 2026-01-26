@@ -1,3 +1,4 @@
+from functools import wraps
 import traceback
 from typing import Annotated, Literal, Union
 
@@ -11,6 +12,19 @@ from utils import setup_logger
 
 logger = setup_logger(__file__)
 
+def endpoint_error_handler(func):
+    @wraps(func)
+    def wrapper(*args, **kwargs):
+        try:
+            return func(*args, **kwargs)
+        except HTTPException:
+            # Let already-constructed HTTPExceptions pass through untouched
+            raise
+        except Exception as e:
+            message = f"{e!r}\n{traceback.format_exc()}"
+            logger.error(message)
+            raise HTTPException(status_code=500, detail=message) from e
+    return wrapper
 
 def create_app(config) -> FastAPI:
     app = FastAPI()
@@ -44,7 +58,7 @@ def create_app(config) -> FastAPI:
         endpoint: Annotated[Union[EndpointName, EndpointConfig], Field(discriminator="kind")]
 
     @app.post("/process")
-    # TODO: Implement try/catch return error in decorator. It will be the same for all endpoints.
+    @endpoint_error_handler()
     def process_data(data: InvokeRequestData, config=Depends(get_config)):
         """
         Performs an API request to the given endpoint on the given target.
