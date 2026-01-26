@@ -1,12 +1,6 @@
 from fastapi import FastAPI
 
-from routers.generic import create_router as create_generic_router
-from utils import setup_logger
-
-logger = setup_logger(__file__)
-
-from fastapi import FastAPI
-
+from routers.registry import build_routers
 from utils import setup_logger
 
 logger = setup_logger(__file__)
@@ -23,6 +17,7 @@ def create_app(config) -> FastAPI:
         logger.debug(f"get_config: {config}")
         return config
 
-    app.include_router(create_generic_router(get_config))
+    for router in build_routers(get_config):
+        app.include_router(router)
 
     return app
