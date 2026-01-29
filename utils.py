@@ -4,7 +4,7 @@ import socket
 import time
 import traceback
 from pathlib import Path
-from typing import Any, Dict, List, Tuple
+from typing import Any, Collection, Dict, List, Tuple
 
 import requests
 from pydantic import BaseModel, Field, PositiveInt
@@ -301,3 +301,29 @@ def paged_request(request: dict, max_attempts: PositiveInt, page_request_delay: 
             "attempt_num": attempt_num,
         },
     }
+
+
+def redact_keys(
+    obj: Any,
+    keys_to_redact: Collection[str],
+    replacement: Any = "<redacted>",
+):
+    """
+    Return a copy of `obj` where any dict entry whose key is in keys_to_redact
+    has its value replaced with `replacement`, recursively through dicts and
+    lists/tuples.
+    """
+    if isinstance(obj, dict):
+        new_dict = {}
+        for key, value in obj.items():
+            if key in keys_to_redact:
+                new_dict[key] = replacement
+            else:
+                new_dict[key] = redact_keys(value, keys_to_redact, replacement)
+        return new_dict
+    elif isinstance(obj, list):
+        return [redact_keys(item, keys_to_redact, replacement) for item in obj]
+    elif isinstance(obj, tuple):
+        return tuple(redact_keys(item, keys_to_redact, replacement) for item in obj)
+    else:
+        return obj
