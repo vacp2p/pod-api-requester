@@ -4,11 +4,7 @@ from fastapi import APIRouter, Depends, Request
 
 from common import call_endpoint, get_pod_infos
 from configs import ConfigRequest
-from routers.deps import (
-    InvokeRequestData,
-    endpoint_error_handler,
-    unwrap_arg,
-)
+from routers.deps import InvokeRequestData, endpoint_error_handler, unwrap_arg
 from schemas import NotFoundError
 from utils import setup_logger
 
@@ -25,6 +21,7 @@ def create_router(get_config: Callable[[], Awaitable[dict]]) -> APIRouter:
         data: InvokeRequestData,
         config=Depends(get_config),
     ):
+        logger.info(f"/process. request: `{request}` data: `{data}`")
         target = unwrap_arg(data.target, "targets", config)
         endpoint = unwrap_arg(data.endpoint, "endpoints", config)
 

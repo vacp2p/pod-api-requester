@@ -8,12 +8,7 @@ from pydantic import BaseModel, Field, NonNegativeInt
 
 from common import call_endpoint, get_pod_infos
 from configs import ConfigEndpoint
-from routers.deps import (
-    TargetConfig,
-    TargetName,
-    endpoint_error_handler,
-    unwrap_arg,
-)
+from routers.deps import TargetConfig, TargetName, endpoint_error_handler, unwrap_arg
 from schemas import NotFoundError, TargetPodInfo
 from utils import redact_keys, setup_logger
 

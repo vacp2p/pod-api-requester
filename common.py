@@ -1,7 +1,9 @@
 import traceback
-from typing import List, Optional
+from functools import lru_cache
+from typing import Iterable, List, Optional
 
 import requests
+from kubernetes.client.models.v1_pod import V1Pod
 
 from configs import ConfigEndpoint, ConfigRequest, ConfigTarget
 from kube_client import core_v1
@@ -70,18 +72,27 @@ def get_pod_infos(
     return pods_info
 
 
+@lru_cache(maxsize=128)
+def get_pods_for_service(service: str, *, namespace: Optional[str] = None) -> List[str]:
+    service = core_v1.read_namespaced_service(service, namespace)
+    selector = service.spec.selector
+    selector_str = ",".join([f"{k}={v}" for k, v in selector.items()])
+    return core_v1.list_namespaced_pod(namespace, label_selector=selector_str)
+
+
 def get_pods_for_target(target: ConfigTarget, *, namespace: Optional[str] = None) -> List[str]:
     if not namespace:
         namespace = (
             open("/var/run/secrets/kubernetes.io/serviceaccount/namespace").read() or "default"
         )
 
-    if target.service:
+    if not target.service:
         pods = core_v1.list_namespaced_pod(namespace)
     else:
-        service = core_v1.read_namespaced_service(target.service, namespace)
-        selector = service.spec.selector
-        selector_str = ",".join([f"{k}={v}" for k, v in selector.items()])
-        pods = core_v1.list_namespaced_pod(namespace, label_selector=selector_str)
+        pods = get_pods_for_service(target.service, namespace=namespace)
 
-    return list(filter(lambda pod: target.matches(pod, namespace=namespace), pods.items))
+    return filter_pods(target, pods.items, namespace=namespace)
+
+
+def filter_pods(target: ConfigTarget, pods: Iterable[V1Pod], *, namespace: Optional[str] = None):
+    return list(filter(lambda pod: target.matches(pod, namespace=namespace), pods))
