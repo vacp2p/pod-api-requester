@@ -44,4 +44,13 @@ def create_router(get_config: Callable[[], Awaitable[dict]]) -> APIRouter:
         result = call_endpoint(configRequest.endpoint, pod_info)
         return result
 
+    @router.post("/cache/clear")
+    @endpoint_error_handler
+    async def process_data(
+        request: Request,
+        config=Depends(get_config),
+    ):
+        request.app.state.cache.clear()
+        return {"cleared": True}
+
     return router
