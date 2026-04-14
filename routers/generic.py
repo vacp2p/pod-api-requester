@@ -32,7 +32,12 @@ def create_router(get_config: Callable[[], Awaitable[dict]]) -> APIRouter:
             retry_delay=0,
         )
         try:
-            pod_info = next(iter(get_pod_infos([target], namespace=request.app.state.namespace)))
+            pods = get_pod_infos(
+                [target],
+                namespace=request.app.state.namespace,
+                cache=request.app.state.cache,
+            )
+            pod_info = next(iter(pods))
         except StopIteration as e:
             raise NotFoundError(f"Target not found. Target: {target}") from e
 

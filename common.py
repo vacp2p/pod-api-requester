@@ -1,5 +1,5 @@
 import traceback
-from functools import lru_cache
+from collections import defaultdict
 from typing import Iterable, List, Optional
 
 import requests
@@ -11,6 +11,8 @@ from schemas import TargetPodInfo
 from utils import paged_request, setup_logger
 
 logger = setup_logger(__file__)
+
+CACHE_ALL_KEY = "*"
 
 
 def do_request(request: ConfigRequest, pod_info: TargetPodInfo):
@@ -49,7 +51,10 @@ def call_endpoint(endpoint: ConfigEndpoint, pod_info: TargetPodInfo) -> dict:
                 raise AttributeError(f"Unknown request type. request: `{endpoint}`")
 
         result_data["request"].update(request_data)
-        result_data["response"] = {"status_code": result.status_code, "text": result.text}
+        result_data["response"] = {
+            "status_code": result.status_code,
+            "text": result.text,
+        }
     except Exception as e:
         error = traceback.format_exc()
         logger.error(
@@ -62,37 +67,41 @@ def call_endpoint(endpoint: ConfigEndpoint, pod_info: TargetPodInfo) -> dict:
 
 
 def get_pod_infos(
-    targets: List[ConfigTarget], *, namespace: Optional[str] = None
+    targets: List[ConfigTarget],
+    *,
+    namespace: Optional[str] = None,
+    cache: Optional[defaultdict] = None,
 ) -> List[TargetPodInfo]:
     pods_info: List[TargetPodInfo] = []
     for target in targets:
-        pods = get_pods_for_target(target, namespace=namespace)
-        for pod in pods:
+        ns_key = namespace or CACHE_ALL_KEY
+        svc_key = target.service or CACHE_ALL_KEY
+        try:
+            pods = cache[ns_key][svc_key]
+        except (TypeError, KeyError):
+            pods = get_pods(service=target.service, namespace=namespace)
+            cache[ns_key][svc_key] = pods
+        for pod in filter_pods(target, pods, namespace=namespace):
             pods_info.append(TargetPodInfo(config_target=target, pod=pod))
     return pods_info
 
 
-@lru_cache(maxsize=128)
-def get_pods_for_service(service: str, *, namespace: Optional[str] = None) -> List[str]:
-    service = core_v1.read_namespaced_service(service, namespace)
-    selector = service.spec.selector
-    selector_str = ",".join([f"{k}={v}" for k, v in selector.items()])
-    return core_v1.list_namespaced_pod(namespace, label_selector=selector_str)
-
-
-def get_pods_for_target(target: ConfigTarget, *, namespace: Optional[str] = None) -> List[str]:
+def get_pods(*, service: Optional[str], namespace: Optional[str] = None) -> List[str]:
     if not namespace:
         namespace = (
             open("/var/run/secrets/kubernetes.io/serviceaccount/namespace").read() or "default"
         )
 
-    if not target.service:
-        pods = core_v1.list_namespaced_pod(namespace)
+    if service:
+        service = core_v1.read_namespaced_service(service, namespace)
+        selector = service.spec.selector
+        selector_str = ",".join([f"{k}={v}" for k, v in selector.items()])
+        return core_v1.list_namespaced_pod(namespace, label_selector=selector_str)
     else:
-        pods = get_pods_for_service(target.service, namespace=namespace)
-
-    return filter_pods(target, pods.items, namespace=namespace)
+        return core_v1.list_namespaced_pod(namespace)
 
 
-def filter_pods(target: ConfigTarget, pods: Iterable[V1Pod], *, namespace: Optional[str] = None):
-    return list(filter(lambda pod: target.matches(pod, namespace=namespace), pods))
+def filter_pods(
+    target: ConfigTarget, pods: Iterable[V1Pod], *, namespace: Optional[str] = None
+) -> Iterable[V1Pod]:
+    return filter(lambda pod: target.matches(pod, namespace=namespace), pods)

@@ -1,3 +1,5 @@
+from collections import defaultdict
+
 from fastapi import FastAPI
 
 from routers.registry import build_routers
@@ -16,6 +18,8 @@ def create_app(config) -> FastAPI:
     async def get_config() -> dict:
         logger.debug(f"get_config: {config}")
         return config
+
+    app.state.cache = defaultdict(dict)
 
     for router in build_routers(get_config):
         app.include_router(router)
