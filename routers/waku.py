@@ -8,12 +8,7 @@ from pydantic import BaseModel, Field, NonNegativeInt
 
 from common import call_endpoint, get_pod_infos
 from configs import ConfigEndpoint
-from routers.deps import (
-    TargetConfig,
-    TargetName,
-    endpoint_error_handler,
-    unwrap_arg,
-)
+from routers.deps import TargetConfig, TargetName, endpoint_error_handler, unwrap_arg
 from schemas import NotFoundError, TargetPodInfo
 from utils import redact_keys, setup_logger
 
@@ -67,7 +62,12 @@ def create_router(get_config: Callable[[], Awaitable[dict]]) -> APIRouter:
         target = unwrap_arg(data.target, "targets", config)
 
         try:
-            pod_info = next(iter(get_pod_infos([target], namespace=request.app.state.namespace)))
+            pods = get_pod_infos(
+                target=[target],
+                namespace=request.app.state.namespace,
+                cache=request.app.state.cache,
+            )
+            pod_info = next(iter(pods))
         except StopIteration as e:
             raise NotFoundError(f"Target not found. Target: {target}") from e
 
