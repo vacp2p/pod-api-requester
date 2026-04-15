@@ -80,7 +80,8 @@ def get_pod_infos(
             pods = cache[ns_key][svc_key]
         except (TypeError, KeyError):
             pods = get_pods(service=target.service, namespace=namespace)
-            cache[ns_key][svc_key] = pods
+            if cache is not None:
+                cache[ns_key][svc_key] = pods
         for pod in filter_pods(target, pods, namespace=namespace):
             pods_info.append(TargetPodInfo(config_target=target, pod=pod))
     return pods_info
