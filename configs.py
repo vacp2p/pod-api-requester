@@ -118,7 +118,7 @@ class ConfigTarget(BaseModel):
     """Port to use for requests to endpoints with this target.
     Default is 80."""
 
-    def matches(self, pod: V1Pod, *, namespace: str) -> bool:
+    def matches(self, pod: V1Pod, namespace: str) -> bool:
         """Check if pod is a valid target of self"""
 
         if self.stateful_set is not None:

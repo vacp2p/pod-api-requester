@@ -68,31 +68,25 @@ def call_endpoint(endpoint: ConfigEndpoint, pod_info: TargetPodInfo) -> dict:
 
 def get_pod_infos(
     targets: List[ConfigTarget],
+    namespace: str,
     *,
-    namespace: Optional[str] = None,
     cache: Optional[defaultdict] = None,
 ) -> List[TargetPodInfo]:
     pods_info: List[TargetPodInfo] = []
     for target in targets:
-        ns_key = namespace or CACHE_ALL_KEY
         svc_key = target.service or CACHE_ALL_KEY
         try:
-            pods = cache[ns_key][svc_key]
+            pods = cache[namespace][svc_key]
         except (TypeError, KeyError):
             pods = get_pods(service=target.service, namespace=namespace)
             if cache is not None:
-                cache[ns_key][svc_key] = pods
-        for pod in filter_pods(target, pods, namespace=namespace):
+                cache[namespace][svc_key] = pods
+        for pod in filter_pods(target, pods, namespace):
             pods_info.append(TargetPodInfo(config_target=target, pod=pod))
     return pods_info
 
 
-def get_pods(*, service: Optional[str], namespace: Optional[str] = None) -> List[str]:
-    if not namespace:
-        namespace = (
-            open("/var/run/secrets/kubernetes.io/serviceaccount/namespace").read() or "default"
-        )
-
+def get_pods(*, namespace: str, service: Optional[str]) -> List[str]:
     if service:
         service = core_v1.read_namespaced_service(service, namespace)
         selector = service.spec.selector
@@ -102,7 +96,5 @@ def get_pods(*, service: Optional[str], namespace: Optional[str] = None) -> List
         return core_v1.list_namespaced_pod(namespace)
 
 
-def filter_pods(
-    target: ConfigTarget, pods: Iterable[V1Pod], *, namespace: Optional[str] = None
-) -> Iterable[V1Pod]:
-    return filter(lambda pod: target.matches(pod, namespace=namespace), pods.items)
+def filter_pods(target: ConfigTarget, pods: Iterable[V1Pod], namespace: str) -> Iterable[V1Pod]:
+    return filter(lambda pod: target.matches(pod, namespace), pods.items)
