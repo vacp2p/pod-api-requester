@@ -104,4 +104,4 @@ def get_pods(*, service: Optional[str], namespace: Optional[str] = None) -> List
 def filter_pods(
     target: ConfigTarget, pods: Iterable[V1Pod], *, namespace: Optional[str] = None
 ) -> Iterable[V1Pod]:
-    return filter(lambda pod: target.matches(pod, namespace=namespace), pods)
+    return filter(lambda pod: target.matches(pod, namespace=namespace), pods.items)
