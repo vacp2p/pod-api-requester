@@ -63,7 +63,7 @@ def create_router(get_config: Callable[[], Awaitable[dict]]) -> APIRouter:
 
         try:
             pods = get_pod_infos(
-                target=[target],
+                targets=[target],
                 namespace=request.app.state.namespace,
                 cache=request.app.state.cache,
             )
