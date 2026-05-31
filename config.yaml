@@ -21,6 +21,17 @@ data:
         stateful_set: "client-0"
         port: 8645
 
+      # Example target for gossip priority queue testing
+      - name: nimp2pNodes
+        service: nimp2p-service
+        stateful_set: "nimp2p"
+        port: 8645
+
+      - name: nimp2pSlowNodes
+        service: nimp2p-service
+        stateful_set: "nimp2p-slow"
+        port: 8645
+
 
     endpoints:
       - name: set-debug
@@ -44,12 +55,25 @@ data:
         type: "POST"
         paged: False
 
+      # Gossip publish endpoint for nim-libp2p testing
+      - name: gossip-publish
+        url: "http://{node}:{port}/publish"
+        headers: {"Content-Type": "application/json"}
+        params: {"topic": "test", "msgSize": 1024, "version": 1}
+        type: "POST"
+        paged: False
+
 
     requests:
       - name: publish-request
         endpoint: lightpush-publish-static-sharding
         retries: 0
         retry_delay: 0.3
+
+      - name: gossip-medium
+        endpoint: gossip-publish
+        retries: 0
+        retry_delay: 0
 
     actions:
       - name: publish-to-clients-random
@@ -60,3 +84,14 @@ data:
         order: ascending
         loop_order: foreach_request_target_each_pod
 
+      # Load test: priority-queues test 2 msg/s per node, 1200 messages per node (10 minutes test duration)
+      - name: gossip-medium-overflow
+        requests: ["gossip-medium"]
+        targets: ["nimp2pNodes"]
+        pod_count: "all"
+        order: ascending
+        loop_order: foreach_pod_make_all_requests
+        load_test:
+          enabled: true
+          rate_per_pod: 2
+          messages_per_pod: 1200

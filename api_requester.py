@@ -1,4 +1,5 @@
 import argparse
+import asyncio
 import random
 from argparse import Namespace
 from collections import defaultdict
@@ -9,6 +10,7 @@ import uvicorn
 import yaml
 
 from app import create_app
+from async_client import run_load_test
 from common import call_endpoint, get_pod_infos
 from configs import ConfigAction, ConfigEndpoint, ConfigRequest, ConfigTarget
 from schemas import TargetPodInfo
@@ -112,6 +114,12 @@ def do_action(
         pods.append(possible_pods[index])
         index = (index + 1) % len(possible_pods)
 
+    # Load test mode (async)
+    if action.load_test.enabled:
+        logger.info(f"Running action '{action.name}' in load_test mode (pods={len(pods)})")
+        return asyncio.run(run_load_test(action, pods))
+
+    # Synchronous mode
     if action.loop_order == "foreach_pod_make_all_requests":
         for pod in pods:
             for request in action.requests:
