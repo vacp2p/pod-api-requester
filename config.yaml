@@ -94,4 +94,5 @@ data:
         load_test:
           enabled: true
           rate_per_pod: 2
+          parallel_workers: true
           messages_per_pod: 1200

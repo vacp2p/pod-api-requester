@@ -142,9 +142,14 @@ def main(args: Namespace):
         app = create_app(config)
         uvicorn.run(app, host="0.0.0.0", port=args.port, log_config=None)
     else:
-        pods_info = get_pod_infos(config["targets"])
-        for action in config["actions"]:
-            do_action(action, pods_info)
+        namespace = (
+            open("/var/run/secrets/kubernetes.io/serviceaccount/namespace").read().strip() or "default"
+        )
+        logger.info(f"Running in batch mode, namespace: {namespace}")
+        pods_info = get_pod_infos(list(config["targets"].values()), namespace)
+        for action in config["actions"].values():
+            result = do_action(action, pods_info)
+            logger.info(f"Action result: {result}")
 
 
 def mode_type(value):
