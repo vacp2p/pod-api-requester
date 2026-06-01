@@ -86,7 +86,9 @@ def create_router(get_config: Callable[[], Awaitable[dict]]) -> APIRouter:
         action_name: str,
         config=Depends(get_config),
     ):
-        """Run a pre-configured load test action."""
+        """Run a load test action defined in config.yaml. 
+        Targets the first pod in the list to act as the message injector.
+        """
         if action_name not in config["actions"]:
             raise NotFoundError(f"Action not found: {action_name}")
 
@@ -95,17 +97,18 @@ def create_router(get_config: Callable[[], Awaitable[dict]]) -> APIRouter:
         if not action.load_test.enabled:
             return {"error": "load_test not enabled for this action"}
 
-        pods = get_pod_infos(
-            targets=action.targets,
-            namespace=request.app.state.namespace,
-            cache=request.app.state.cache,
-        )
+        try:
+            pods = get_pod_infos(
+                targets=action.targets,
+                namespace=request.app.state.namespace,
+                cache=request.app.state.cache,
+            )
+            pod_info = next(iter(pods))
+        except StopIteration as e:
+            raise NotFoundError(f"No pods found for action: {action_name}") from e
 
-        if not pods:
-            raise NotFoundError(f"No pods found for action: {action_name}")
-
-        logger.info(f"load_test action={action_name} pods={len(pods)}")
-        return await run_load_test(action, pods)
+        logger.info(f"load_test action={action_name} pod={pod_info.pod_name}")
+        return await run_load_test(action, [pod_info])
 
     @router.post("/loadtest/inline")
     @endpoint_error_handler
@@ -114,7 +117,9 @@ def create_router(get_config: Callable[[], Awaitable[dict]]) -> APIRouter:
         data: LoadTestInlineRequest,
         config=Depends(get_config),
     ):
-        """Run an inline load test."""
+        """Run an ad-hoc load test with parameters from the request body.
+        Targets the first pod in the list to act as the message injector.
+        """
         target = unwrap_arg(data.target, "targets", config)
 
         if data.endpoint not in config["endpoints"]:
@@ -132,7 +137,7 @@ def create_router(get_config: Callable[[], Awaitable[dict]]) -> APIRouter:
         )
         load_test_config.validate_config()
 
-        temp_action = ConfigAction(
+        inline_action = ConfigAction(
             name="inline_load_test",
             loop_order="foreach_pod_make_all_requests",
             targets=[target],
@@ -141,16 +146,17 @@ def create_router(get_config: Callable[[], Awaitable[dict]]) -> APIRouter:
             load_test=load_test_config,
         )
 
-        pods = get_pod_infos(
-            targets=[target],
-            namespace=request.app.state.namespace,
-            cache=request.app.state.cache,
-        )
+        try:
+            pods = get_pod_infos(
+                targets=[target],
+                namespace=request.app.state.namespace,
+                cache=request.app.state.cache,
+            )
+            pod_info = next(iter(pods))
+        except StopIteration as e:
+            raise NotFoundError(f"No pods found for target: {target.name}") from e
 
-        if not pods:
-            raise NotFoundError(f"No pods found for target: {target.name}")
-
-        logger.info(f"inline load_test pods={len(pods)} endpoint={data.endpoint}")
-        return await run_load_test(temp_action, pods)
+        logger.info(f"inline load_test pod={pod_info.pod_name} endpoint={data.endpoint}")
+        return await run_load_test(inline_action, [pod_info])
 
     return router

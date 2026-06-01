@@ -119,7 +119,6 @@ def do_action(
         logger.info(f"Running action '{action.name}' in load_test mode (pods={len(pods)})")
         return asyncio.run(run_load_test(action, pods))
 
-    # Synchronous mode
     if action.loop_order == "foreach_pod_make_all_requests":
         for pod in pods:
             for request in action.requests:

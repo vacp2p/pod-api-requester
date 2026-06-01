@@ -253,6 +253,8 @@ async def run_load_test(
         raise ValueError("No target pods for load test")
 
     stats = RequestStats()
+    worker_results = []
+    worker_errors = []
 
     start_time = time.time()
     connector = aiohttp.TCPConnector(ttl_dns_cache=300, limit=0)
@@ -269,10 +271,16 @@ async def run_load_test(
                     session=session,
                     stats=stats,
                 )
-                workers.append(asyncio.create_task(run_pod_worker(ctx)))
-            worker_results = await asyncio.gather(*workers, return_exceptions=True)
+                workers.append((i, asyncio.create_task(run_pod_worker(ctx))))
+
+            for worker_id, task in workers:
+                try:
+                    result = await task
+                    worker_results.append(result)
+                except Exception as e:
+                    worker_errors.append({"worker_id": worker_id, "error": str(e)})
+                    logger.error(f"Worker {worker_id} failed: {e}")
         else:
-            worker_results = []
             for i, pod_info in enumerate(pods):
                 ctx = WorkerContext(
                     worker_id=i,
@@ -281,8 +289,12 @@ async def run_load_test(
                     session=session,
                     stats=stats,
                 )
-                result = await run_pod_worker(ctx)
-                worker_results.append(result)
+                try:
+                    result = await run_pod_worker(ctx)
+                    worker_results.append(result)
+                except Exception as e:
+                    worker_errors.append({"worker_id": i, "error": str(e)})
+                    logger.error(f"Worker {i} failed: {e}")
 
     elapsed_total = time.time() - start_time
     final_stats = await stats.snapshot()
@@ -293,6 +305,7 @@ async def run_load_test(
         "elapsed_seconds": elapsed_total,
         "stats": final_stats,
         "throughput_msg_per_sec": final_stats["total"] / elapsed_total if elapsed_total > 0 else 0,
+        "worker_errors": worker_errors,
     }
 
     logger.info(
