@@ -207,6 +207,8 @@ async def run_pod_worker(ctx: WorkerContext) -> Dict[str, Any]:
         load_test.duration_seconds, load_test.rate_per_pod,
     )
 
+    tasks = []
+
     while True:
         if load_test.messages_per_pod is not None and message_index >= load_test.messages_per_pod:
             break
@@ -214,18 +216,18 @@ async def run_pod_worker(ctx: WorkerContext) -> Dict[str, Any]:
             break
 
         # Send burst
-        burst_tasks = []
         for _ in range(burst_size):
             if load_test.messages_per_pod is not None and message_index >= load_test.messages_per_pod:
                 break
             request = requests_list[message_index % len(requests_list)]
-            burst_tasks.append(asyncio.create_task(send_async_request(ctx, request, message_index)))
+            tasks.append(asyncio.create_task(send_async_request(ctx, request, message_index)))
             message_index += 1
 
-        if burst_tasks:
-            await asyncio.gather(*burst_tasks, return_exceptions=True)
-
         await asyncio.sleep(burst_delay if burst_size > 1 else delay_seconds)
+
+    # Wait for all in-flight requests to complete
+    if tasks:
+        await asyncio.gather(*tasks, return_exceptions=True)
 
     elapsed_total = time.time() - start_time
     logger.info(
