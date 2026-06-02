@@ -226,8 +226,11 @@ async def run_pod_worker(ctx: WorkerContext) -> Dict[str, Any]:
         await asyncio.sleep(burst_delay if burst_size > 1 else delay_seconds)
 
     # Wait for all in-flight requests to complete
-    if tasks:
-        await asyncio.gather(*tasks, return_exceptions=True)
+    for task in tasks:
+        try:
+            await task
+        except Exception as e:
+            logger.error(f"Request failed: {e}")
 
     elapsed_total = time.time() - start_time
     logger.info(
