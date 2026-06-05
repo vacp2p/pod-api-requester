@@ -1,10 +1,10 @@
 import datetime
 import logging
 import re
-from typing import List, Literal, Optional
+from typing import List, Literal, Optional, Union
 
 from kubernetes.client.models.v1_pod import V1Pod
-from pydantic import BaseModel, NonNegativeFloat, NonNegativeInt, PositiveInt
+from pydantic import BaseModel, NonNegativeFloat, NonNegativeInt, PositiveFloat, PositiveInt
 
 from kube_client import core_v1
 
@@ -145,6 +145,30 @@ class ConfigTarget(BaseModel):
         return True
 
 
+class LoadTestConfig(BaseModel):
+    """Load testing mode configuration."""
+
+    enabled: bool = False
+    rate_per_pod: Optional[PositiveFloat] = None
+    messages_per_pod: Optional[PositiveInt] = None
+    duration_seconds: Optional[PositiveFloat] = None
+    parallel_workers: bool = True
+    request_timeout: PositiveFloat = 30.0
+    burst_size: Optional[PositiveInt] = None
+    burst_delay: Optional[PositiveFloat] = None
+
+    def get_delay_seconds(self) -> float:
+        if self.rate_per_pod is not None:
+            return 1.0 / self.rate_per_pod
+        return 1.0
+
+    def validate_config(self) -> None:
+        if not self.enabled:
+            return
+        if self.messages_per_pod is None and self.duration_seconds is None:
+            raise ValueError("Load test requires 'messages_per_pod' or 'duration_seconds'")
+
+
 class ConfigAction(BaseModel):
     """Description of an action to take. Here is how an action is performed:
     1. For each ConfigTarget, add all pods to the list.
@@ -217,3 +241,5 @@ class ConfigAction(BaseModel):
     requests: List[ConfigRequest]
     """The list of requests to do for each pod that ends up in the list of pods to request to.
     Every request will be executed, but it may not be on all pods matching every `ConfigTarget` in `targets`. See `targets`."""
+
+    load_test: LoadTestConfig = LoadTestConfig()

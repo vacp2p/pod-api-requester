@@ -1,4 +1,5 @@
 import argparse
+import asyncio
 import random
 from argparse import Namespace
 from collections import defaultdict
@@ -9,6 +10,7 @@ import uvicorn
 import yaml
 
 from app import create_app
+from async_client import run_load_test
 from common import call_endpoint, get_pod_infos
 from configs import ConfigAction, ConfigEndpoint, ConfigRequest, ConfigTarget
 from schemas import TargetPodInfo
@@ -112,6 +114,11 @@ def do_action(
         pods.append(possible_pods[index])
         index = (index + 1) % len(possible_pods)
 
+    # Load test mode (async)
+    if action.load_test.enabled:
+        logger.info(f"Running action '{action.name}' in load_test mode (pods={len(pods)})")
+        return asyncio.run(run_load_test(action, pods))
+
     if action.loop_order == "foreach_pod_make_all_requests":
         for pod in pods:
             for request in action.requests:
@@ -134,9 +141,14 @@ def main(args: Namespace):
         app = create_app(config)
         uvicorn.run(app, host="0.0.0.0", port=args.port, log_config=None)
     else:
-        pods_info = get_pod_infos(config["targets"])
-        for action in config["actions"]:
-            do_action(action, pods_info)
+        namespace = (
+            open("/var/run/secrets/kubernetes.io/serviceaccount/namespace").read().strip() or "default"
+        )
+        logger.info(f"Running in batch mode, namespace: {namespace}")
+        pods_info = get_pod_infos(list(config["targets"].values()), namespace)
+        for action in config["actions"].values():
+            result = do_action(action, pods_info)
+            logger.info(f"Action result: {result}")
 
 
 def mode_type(value):
