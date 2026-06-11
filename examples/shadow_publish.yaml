@@ -1,0 +1,39 @@
+# Example batch config for the in-Shadow libp2p publisher.
+#
+# Run inside the Shadow simulator as the `publisher` host:
+#   python api_requester.py --mode batch --config examples/shadow_publish.yaml
+#
+# This reproduces the legacy traffic_sync.py injector: publish `pod_count`
+# messages, one to each of pod-0, pod-1, ... in turn (round-robin), spaced
+# `delay` seconds apart, to each peer's /publish REST endpoint. Targets are
+# resolved purely by hostname (Shadow DNS) -- no Kubernetes API is used.
+
+targets:
+  - name: peers
+    host_template: "pod-{i}"   # Shadow host names
+    host_count: 100            # = PEERS / num_nodes
+    port: 8645                 # nim test-node REST port
+
+endpoints:
+  - name: libp2p-publish
+    url: "http://{node}:{port}/publish"
+    headers: { "Content-Type": "application/json" }
+    params: { "topic": "test", "msgSize": 1000, "version": 1 }
+    type: "POST"
+    paged: false
+
+requests:
+  - name: publish
+    endpoint: libp2p-publish
+    retries: 0
+    retry_delay: 0
+
+actions:
+  - name: inject-traffic
+    requests: ["publish"]
+    targets: ["peers"]
+    order: ascending           # numeric: pod-0, pod-1, ... (natural sort)
+    pod_start_index: 0
+    pod_count: 5               # = num_messages
+    delay: 2.0                 # seconds between messages (= delay_seconds)
+    loop_order: foreach_request_target_each_pod

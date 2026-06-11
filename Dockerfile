@@ -8,6 +8,7 @@ COPY api_requester.py \
     configs.py \
     kube_client.py \
     common.py \
+    shadow_resolver.py \
     schemas.py \
     app.py \
     /app/

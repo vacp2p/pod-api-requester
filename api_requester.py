@@ -1,14 +1,14 @@
 import argparse
 import random
+import re
+import time
 from argparse import Namespace
 from collections import defaultdict
 from pathlib import Path
 from typing import Dict, List
 
-import uvicorn
 import yaml
 
-from app import create_app
 from common import call_endpoint, get_pod_infos
 from configs import ConfigAction, ConfigEndpoint, ConfigRequest, ConfigTarget
 from schemas import TargetPodInfo
@@ -89,6 +89,10 @@ def load_configs(config_files: List[str]) -> Dict[str, Dict[str, object]]:
     return parse_config(full_config)
 
 
+def _natural_key(name: str):
+    return [int(part) if part.isdigit() else part for part in re.split(r"(\d+)", name)]
+
+
 def do_action(
     action: ConfigAction,
     pods: List[TargetPodInfo],
@@ -99,9 +103,9 @@ def do_action(
     if action.order == "random":
         random.shuffle(possible_pods)
     elif action.order == "ascending":
-        possible_pods.sort(key=lambda pod: pod.pod_name)
+        possible_pods.sort(key=lambda pod: _natural_key(pod.pod_name))
     elif action.order == "descending":
-        possible_pods.sort(key=lambda pod: pod.pod_name, reverse=True)
+        possible_pods.sort(key=lambda pod: _natural_key(pod.pod_name), reverse=True)
     else:
         raise ValueError(f"Unknown order for action: {action.order}")
 
@@ -115,13 +119,15 @@ def do_action(
     if action.loop_order == "foreach_pod_make_all_requests":
         for pod in pods:
             for request in action.requests:
-                # time.sleep(delay_between_requests) TODO
-                call_endpoint(request, pod)
+                call_endpoint(request.endpoint, pod)
+                if action.delay:
+                    time.sleep(action.delay)
     elif action.loop_order == "foreach_request_target_each_pod":
         for request in action.requests:
-            # TODO: ensure time between requests has elapsed
             for pod in pods:
-                call_endpoint(request, pod)
+                call_endpoint(request.endpoint, pod)
+                if action.delay:
+                    time.sleep(action.delay)
     else:
         raise ValueError(f"Unknown loop_order for action: {action}")
 
@@ -131,11 +137,18 @@ def main(args: Namespace):
     available_endpoints = [endpoint.name for endpoint in config["endpoints"].values()]
     logger.debug(f"Loaded config. Available endpoints: {available_endpoints}")
     if args.mode == "server":
+    # Note: `uvicorn` and `app` (FastAPI) are imported lazily here
+    # so that batch mode does not require the server-only dependencies.
+        import uvicorn
+
+        from app import create_app
+
         app = create_app(config)
         uvicorn.run(app, host="0.0.0.0", port=args.port, log_config=None)
     else:
-        pods_info = get_pod_infos(config["targets"])
-        for action in config["actions"]:
+        targets = list(config["targets"].values())
+        pods_info = get_pod_infos(targets, namespace=args.namespace)
+        for action in config["actions"].values():
             do_action(action, pods_info)
 
 
@@ -166,6 +179,13 @@ def parse_args() -> argparse.Namespace:
         type=int,
         default=8645,
         help="Port for the action HTTP server (default 8645)",
+    )
+    parser.add_argument(
+        "--namespace",
+        type=str,
+        default=None,
+        help="Kubernetes namespace for resolving k8s targets in batch mode. "
+        "Not required when all targets are static (e.g. Shadow).",
     )
 
     args = parser.parse_args()
