@@ -1,8 +1,20 @@
-FROM python:3.11.9-alpine AS base
-WORKDIR /app
+FROM pearsonwhite/logos-core-dst:wip1-amd AS base
+
+USER root
+RUN apt-get update && \
+    apt-get install -y --no-install-recommends \
+    python-is-python3 && \
+    rm -rf /var/lib/apt/lists/*
+
+USER nixuser
+
+# This is typically created when running logoscore.
+# Since we're adding the tokens before running logoscore, we must manually create it.
+RUN mkdir -p /home/nixuser/.logoscore/client/
 
 COPY requirements.txt .
 RUN pip install --no-cache-dir --break-system-packages -r requirements.txt
+RUN pip install --no-cache-dir --break-system-packages git+https://github.com/logos-co/logos-logoscore-py.git@5842bd32b9b5529abf017a1e9032dee988d8180b
 COPY api_requester.py \
     utils.py \
     configs.py \
