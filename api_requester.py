@@ -1,4 +1,5 @@
 import argparse
+import asyncio
 import random
 import re
 import time
@@ -9,6 +10,7 @@ from typing import Dict, List
 
 import yaml
 
+from async_client import run_load_test
 from common import call_endpoint, get_pod_infos
 from configs import ConfigAction, ConfigEndpoint, ConfigRequest, ConfigTarget
 from schemas import TargetPodInfo
@@ -116,6 +118,11 @@ def do_action(
         pods.append(possible_pods[index])
         index = (index + 1) % len(possible_pods)
 
+    # Load test mode (async)
+    if action.load_test.enabled:
+        logger.info(f"Running action '{action.name}' in load_test mode (pods={len(pods)})")
+        return asyncio.run(run_load_test(action, pods))
+
     if action.loop_order == "foreach_pod_make_all_requests":
         for pod in pods:
             for request in action.requests:
@@ -137,8 +144,8 @@ def main(args: Namespace):
     available_endpoints = [endpoint.name for endpoint in config["endpoints"].values()]
     logger.debug(f"Loaded config. Available endpoints: {available_endpoints}")
     if args.mode == "server":
-    # Note: `uvicorn` and `app` (FastAPI) are imported lazily here
-    # so that batch mode does not require the server-only dependencies.
+        # `uvicorn` and `app` (FastAPI) are imported lazily so that batch mode
+        # does not require the server-only dependencies (fastapi/uvicorn).
         import uvicorn
 
         from app import create_app
@@ -146,10 +153,23 @@ def main(args: Namespace):
         app = create_app(config)
         uvicorn.run(app, host="0.0.0.0", port=args.port, log_config=None)
     else:
-        targets = list(config["targets"].values())
-        pods_info = get_pod_infos(targets, namespace=args.namespace)
+        namespace = args.namespace
+        if namespace is None:
+            # In-cluster runs auto-detect the namespace from the service account;
+            # outside a cluster (e.g. Shadow) there's no such file, and static
+            # targets don't need one.
+            try:
+                namespace = (
+                    open("/var/run/secrets/kubernetes.io/serviceaccount/namespace").read().strip()
+                    or None
+                )
+            except OSError:
+                namespace = None
+        logger.info(f"Running in batch mode, namespace: {namespace}")
+        pods_info = get_pod_infos(list(config["targets"].values()), namespace)
         for action in config["actions"].values():
-            do_action(action, pods_info)
+            result = do_action(action, pods_info)
+            logger.info(f"Action result: {result}")
 
 
 def mode_type(value):

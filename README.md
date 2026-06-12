@@ -86,7 +86,7 @@ client.py           Sample code to make API requests directed at a pod running t
 
 ### Changelog
 
-- `v2.1.0`:
+- `v3.1.0`:
   - Added static / DNS-based target resolution (`hosts`, or `host_template` + `host_count`),
     so targets can be addressed by hostname with no Kubernetes API calls (e.g. inside the
     Shadow simulator).
@@ -96,6 +96,11 @@ client.py           Sample code to make API requests directed at a pod running t
     (per-request HTTP timeout, default 30s — previously requests could block indefinitely).
   - Fixed the batch-mode action path (target/action iteration, namespace passing) and made
     pod ordering numeric (`pod-2` before `pod-10`).
+- `v3.0.0`:
+  - Added **load test mode** for high-throughput async testing
+  - New `LoadTestConfig` in actions with rate limiting and burst support
+  - Added `async_client.py` for aiohttp-based requests
+  - Added `/loadtest/*` API endpoints for server mode
 - `v2.0.0`:
   - Changed to using a ConfigMap to define Targets, Endpoints, Requests, and Actions
   - Added server capability
@@ -110,3 +115,52 @@ client.py           Sample code to make API requests directed at a pod running t
       (randomly choose a node using zerotesting-service)
 - `v1.0.0`:
   Initial version
+
+---
+
+### Load Test Mode
+
+Actions can run in **load test mode** for high-throughput async testing.
+
+#### Enabling Load Test Mode
+
+Add a `load_test` section to any action in `config.yaml`:
+
+```yaml
+actions:
+  - name: gossip-burst
+    requests: ["gossip-publish"]
+    targets: ["nim-nodes"]
+    order: ascending
+    loop_order: foreach_pod_make_all_requests
+    load_test:
+      enabled: true
+      rate_per_pod: 128.0       # messages/second per pod
+      messages_per_pod: 512     # total messages per pod
+```
+
+#### Load Test Configuration Options
+
+| Field | Type | Default | Description |
+|-------|------|---------|-------------|
+| `enabled` | bool | `false` | Enable load test mode |
+| `rate_per_pod` | float | - | Messages per second per pod |
+| `messages_per_pod` | int | - | Total messages per pod |
+| `duration_seconds` | float | - | Run duration (alternative to messages_per_pod) |
+| `burst_size` | int | - | Messages per burst |
+| `burst_delay` | float | - | Delay between bursts |
+| `parallel_workers` | bool | `true` | Run workers in parallel |
+| `request_timeout` | float | `30.0` | HTTP request timeout |
+
+#### HTTP API Endpoints (Server Mode)
+
+```bash
+# List actions with load_test enabled
+GET /loadtest/actions
+
+# Run a pre-configured load test action
+POST /loadtest/run/{action_name}
+
+# Run an inline load test
+POST /loadtest/inline
+```
