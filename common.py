@@ -85,9 +85,10 @@ def get_pod_infos(
         if namespace is None:
             raise ValueError(f"namespace is required to resolve Kubernetes target `{target.name}`.")
         svc_key = target.service or CACHE_ALL_KEY
-        try:
-            pods = cache[namespace][svc_key]
-        except (TypeError, KeyError):
+        cached = cache.get(namespace) if cache is not None else None
+        if cached is not None and svc_key in cached:
+            pods = cached[svc_key]
+        else:
             pods = get_pods(service=target.service, namespace=namespace)
             if cache is not None:
                 cache[namespace][svc_key] = pods
