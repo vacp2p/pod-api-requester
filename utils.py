@@ -1,5 +1,6 @@
 import datetime
 import logging
+import os
 import socket
 import time
 import traceback
@@ -27,8 +28,9 @@ class UTCFormatter(logging.Formatter):
 def setup_logger(name: str) -> logging.Logger:
     handler = logging.StreamHandler()
     handler.setFormatter(UTCFormatter(LOGFMT, datefmt=DATEFMT))
-
-    logging.basicConfig(level=logging.INFO, handlers=[handler], force=True)
+    level_str = os.getenv("LOGGING_LEVEL", "INFO").upper()
+    logging_level = getattr(logging, level_str, logging.INFO)
+    logging.basicConfig(level=logging_level, handlers=[handler], force=True)
     return logging.getLogger(name)
 
 
