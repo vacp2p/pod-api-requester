@@ -8,8 +8,10 @@ from collections import defaultdict
 from pathlib import Path
 from typing import Dict, List
 
+import uvicorn
 import yaml
 
+from app import create_app
 from async_client import run_load_test
 from common import call_endpoint, get_pod_infos
 from configs import ConfigAction, ConfigEndpoint, ConfigRequest, ConfigTarget
@@ -144,12 +146,6 @@ def main(args: Namespace):
     available_endpoints = [endpoint.name for endpoint in config["endpoints"].values()]
     logger.debug(f"Loaded config. Available endpoints: {available_endpoints}")
     if args.mode == "server":
-        # `uvicorn` and `app` (FastAPI) are imported lazily so that batch mode
-        # does not require the server-only dependencies (fastapi/uvicorn).
-        import uvicorn
-
-        from app import create_app
-
         app = create_app(config)
         uvicorn.run(app, host="0.0.0.0", port=args.port, log_config=None)
     else:

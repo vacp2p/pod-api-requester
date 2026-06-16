@@ -48,13 +48,9 @@ Actions - Combines Targets and Requests into a defined action, representing a se
 
 By default a Target is resolved through the Kubernetes API (by `service`,
 `name_template`, and/or `stateful_set`). A Target can instead be resolved purely
-by hostname, with no Kubernetes API calls, useful for the Shadow simulator or
-any environment without a control plane. Set one of:
-
-- `hosts`: an explicit list of hostnames, e.g. `["pod-0", "pod-1"]`.
-- `host_template` + `host_count`: `host_template` is expanded over
-  `range(host_count)`, e.g. `host_template: "pod-{i}"` with `host_count: 100`
-  yields `pod-0` .. `pod-99`.
+by hostname via `hosts` — an explicit list, e.g. `["pod-0", "pod-1"]` — with no
+Kubernetes API calls, useful for the Shadow simulator or any environment without
+a control plane.
 
 The hostname is substituted into the endpoint URL's `{node}` and resolved by the
 HTTP client's OS resolver at request time. Static and Kubernetes targets can be
@@ -87,7 +83,7 @@ client.py           Sample code to make API requests directed at a pod running t
 ### Changelog
 
 - `v3.1.0`:
-  - Added static / DNS-based target resolution (`hosts`, or `host_template` + `host_count`),
+  - Added static / DNS-based target resolution (`hosts`: an explicit hostname list),
     so targets can be addressed by hostname with no Kubernetes API calls (e.g. inside the
     Shadow simulator).
   - `--mode batch` no longer requires a Kubernetes connection when all targets are static:

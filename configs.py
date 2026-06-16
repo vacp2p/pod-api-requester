@@ -125,19 +125,12 @@ class ConfigTarget(BaseModel):
 
     hosts: Optional[List[str]] = None
     """Explicit list of hostnames to target, e.g. ["pod-0", "pod-1"].
-    Resolved directly by DNS, with no Kubernetes API calls."""
-
-    host_template: Optional[str] = None
-    """Hostname template expanded over range(host_count), e.g. "pod-{i}".
-    Use together with `host_count`. Resolved by DNS, no Kubernetes API."""
-
-    host_count: Optional[NonNegativeInt] = None
-    """Number of hosts to expand `host_template` over (i = 0 .. host_count-1)."""
+    Resolved directly by DNS, with no Kubernetes API calls (e.g. Shadow hosts)."""
 
     @property
     def is_static(self) -> bool:
-        """True if this target is resolved by hostname convention (no k8s API)."""
-        return self.hosts is not None or self.host_template is not None
+        """True if this target is resolved by hostname (no k8s API)."""
+        return self.hosts is not None
 
     def matches(self, pod: V1Pod, namespace: str) -> bool:
         """Check if pod is a valid target of self"""

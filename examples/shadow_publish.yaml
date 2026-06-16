@@ -10,8 +10,10 @@
 
 targets:
   - name: peers
-    host_template: "pod-{i}"   # Shadow host names
-    host_count: 100            # = PEERS / num_nodes
+    # Explicit Shadow hostnames. 10ksim generates the full pod-0..pod-(N-1)
+    # list from num_nodes; shown here for a 10-node run.
+    hosts: ["pod-0", "pod-1", "pod-2", "pod-3", "pod-4",
+            "pod-5", "pod-6", "pod-7", "pod-8", "pod-9"]
     port: 8645                 # nim test-node REST port
 
 endpoints:
