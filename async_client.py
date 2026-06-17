@@ -73,7 +73,7 @@ class WorkerContext:
 def build_request_url(endpoint: ConfigEndpoint, pod_info: TargetPodInfo) -> str:
     """Build the full URL for a request to a specific pod."""
     return endpoint.url.format(
-        node=pod_info.pod.status.pod_ip,
+        node=pod_info.node_address,
         port=pod_info.config_target.port,
     )
 

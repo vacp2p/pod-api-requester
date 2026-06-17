@@ -245,7 +245,9 @@ def paged_request(request: dict, max_attempts: PositiveInt, page_request_delay: 
         time.sleep(page_request_delay)
 
         logger.info(f"Making paged request. request: `{request}`, params=`{params}`")
-        response = requests.get(url, headers=request["headers"], params=params)
+        response = requests.get(
+            url, headers=request["headers"], params=params, timeout=request.get("timeout")
+        )
 
         try:
             data = response.json()

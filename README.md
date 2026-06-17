@@ -8,7 +8,16 @@ The script is designed to run inside a Docker container.
 The script can be run in one of two modes: `server` or `batch`.
 
 #### Batch Mode
-Simply runs all actions sequentially
+
+`python ./api_requester.py --mode batch --config /mount/config.yaml`
+
+Runs all actions in the config sequentially, then exits. 
+
+Add `--namespace <ns>` when any target is resolved through the Kubernetes API.
+It can be omitted when every target is static, which is how the requester runs 
+in environments without a Kubernetes control plane such as the Shadow network simulator.
+
+See `examples/shadow_publish.yaml` for a complete batch config.
 
 #### Server Mode
 
@@ -30,10 +39,22 @@ they work together when running an action or making a request.
 Each config object has a name by which it can be referenced.
 Some fields are optional.
 
-Endpoints - Defines an API endpoint for a request.
-Targets - Defines a set of filters to use to determine if pods on a cluster are part of the target.
+Endpoints - Defines an API endpoint for a request. May set a `timeout` (seconds, default 30).
+Targets - Defines a set of filters to use to determine if pods on a cluster are part of the target. May instead be resolved by hostname — see "Static targets".
 Requests - Contains an Endpoint and some additional information for retries and delays.
-Actions - Combines Targets and Requests into a defined action, representing a series of requests.
+Actions - Combines Targets and Requests into a defined action, representing a series of requests. May set a `delay` (seconds) to pace requests.
+
+#### Static targets (no Kubernetes)
+
+By default a Target is resolved through the Kubernetes API (by `service`,
+`name_template`, and/or `stateful_set`). A Target can instead be resolved purely
+by hostname via `hosts` — an explicit list, e.g. `["pod-0", "pod-1"]` — with no
+Kubernetes API calls, useful for the Shadow simulator or any environment without
+a control plane.
+
+The hostname is substituted into the endpoint URL's `{node}` and resolved by the
+HTTP client's OS resolver at request time. Static and Kubernetes targets can be
+mixed in the same config.
 
 #### How an Action is performed
 
@@ -61,6 +82,16 @@ client.py           Sample code to make API requests directed at a pod running t
 
 ### Changelog
 
+- `v3.1.0`:
+  - Added static / DNS-based target resolution (`hosts`: an explicit hostname list),
+    so targets can be addressed by hostname with no Kubernetes API calls (e.g. inside the
+    Shadow simulator).
+  - `--mode batch` no longer requires a Kubernetes connection when all targets are static:
+    the in-cluster client is created lazily, and `--namespace` is optional in that case.
+  - Added `delay` on Actions (pacing between requests) and `timeout` on Endpoints
+    (per-request HTTP timeout, default 30s — previously requests could block indefinitely).
+  - Fixed the batch-mode action path (target/action iteration, namespace passing) and made
+    pod ordering numeric (`pod-2` before `pod-10`).
 - `v3.0.0`:
   - Added **load test mode** for high-throughput async testing
   - New `LoadTestConfig` in actions with rate limiting and burst support

@@ -6,7 +6,7 @@ from typing import List, Literal, Optional, Union
 from kubernetes.client.models.v1_pod import V1Pod
 from pydantic import BaseModel, NonNegativeFloat, NonNegativeInt, PositiveFloat, PositiveInt
 
-from kube_client import core_v1
+from kube_client import get_core_v1
 
 
 class UTCFormatter(logging.Formatter):
@@ -75,6 +75,11 @@ class ConfigEndpoint(BaseModel):
     paged: bool
     """Use `True` if the request returns paged data. Otherwise, use `False`."""
 
+    timeout: NonNegativeFloat = 30.0
+    """Per-request timeout in seconds, passed to the HTTP client. Bounds how long a
+    single request waits before giving up, so one unresponsive target can't stall a
+    whole batch run. Default is 30s."""
+
 
 class ConfigRequest(BaseModel):
     """A request to be made to a pod.
@@ -118,6 +123,15 @@ class ConfigTarget(BaseModel):
     """Port to use for requests to endpoints with this target.
     Default is 80."""
 
+    hosts: Optional[List[str]] = None
+    """Explicit list of hostnames to target, e.g. ["pod-0", "pod-1"].
+    Resolved directly by DNS, with no Kubernetes API calls (e.g. Shadow hosts)."""
+
+    @property
+    def is_static(self) -> bool:
+        """True if this target is resolved by hostname (no k8s API)."""
+        return self.hosts is not None
+
     def matches(self, pod: V1Pod, namespace: str) -> bool:
         """Check if pod is a valid target of self"""
 
@@ -137,7 +151,7 @@ class ConfigTarget(BaseModel):
                 return False
 
         if self.service is not None:
-            service = core_v1.read_namespaced_service(self.service, namespace)
+            service = get_core_v1().read_namespaced_service(self.service, namespace)
             selector = service.spec.selector
             if not all([pod.metadata.labels.get(key) == value for key, value in selector.items()]):
                 return False
@@ -214,6 +228,11 @@ class ConfigAction(BaseModel):
     order: Literal["ascending", "descending", "random"] | None
     """Once the list of possible pods is gathered by combining the lists of pods for each `ConfigTarget`,
     they will be sorted by this ordering before applying `pod_start_index` and `pod_count`.
+    """
+
+    delay: NonNegativeFloat = 0
+    """Seconds to sleep after each individual request is sent, to pace traffic.
+    0 (default) preserves the original back-to-back behaviour. 
     """
 
     targets: List[ConfigTarget]

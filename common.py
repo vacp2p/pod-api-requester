@@ -6,8 +6,9 @@ import requests
 from kubernetes.client.models.v1_pod import V1Pod
 
 from configs import ConfigEndpoint, ConfigRequest, ConfigTarget
-from kube_client import core_v1
+from kube_client import get_core_v1
 from schemas import TargetPodInfo
+from shadow_resolver import resolve_static_target
 from utils import paged_request, setup_logger
 
 logger = setup_logger(__file__)
@@ -25,9 +26,10 @@ def call_endpoint(endpoint: ConfigEndpoint, pod_info: TargetPodInfo) -> dict:
 
     try:
         request_data["url"] = endpoint.url.format(
-            node=pod_info.pod.status.pod_ip, port=pod_info.config_target.port
+            node=pod_info.node_address, port=pod_info.config_target.port
         )
-        request_data["pod"] = f"{pod_info.pod.metadata.name}"
+        request_data["pod"] = f"{pod_info.pod_name}"
+        request_data["timeout"] = endpoint.timeout
         logger.info(f"request_data: {request_data}")
 
         if endpoint.paged:
@@ -40,12 +42,14 @@ def call_endpoint(endpoint: ConfigEndpoint, pod_info: TargetPodInfo) -> dict:
                     request_data["url"],
                     json=request_data["params"],
                     headers=request_data["headers"],
+                    timeout=request_data["timeout"],
                 )
             elif endpoint.type == "GET":
                 result = requests.get(
                     request_data["url"],
                     json=request_data["params"],
                     headers=request_data["headers"],
+                    timeout=request_data["timeout"],
                 )
             else:
                 raise AttributeError(f"Unknown request type. request: `{endpoint}`")
@@ -68,16 +72,23 @@ def call_endpoint(endpoint: ConfigEndpoint, pod_info: TargetPodInfo) -> dict:
 
 def get_pod_infos(
     targets: List[ConfigTarget],
-    namespace: str,
+    namespace: Optional[str] = None,
     *,
     cache: Optional[defaultdict] = None,
 ) -> List[TargetPodInfo]:
     pods_info: List[TargetPodInfo] = []
     for target in targets:
+        if target.is_static:
+            # shadow path
+            pods_info.extend(resolve_static_target(target))
+            continue
+        if namespace is None:
+            raise ValueError(f"namespace is required to resolve Kubernetes target `{target.name}`.")
         svc_key = target.service or CACHE_ALL_KEY
-        try:
-            pods = cache[namespace][svc_key]
-        except (TypeError, KeyError):
+        cached = cache.get(namespace) if cache is not None else None
+        if cached is not None and svc_key in cached:
+            pods = cached[svc_key]
+        else:
             pods = get_pods(service=target.service, namespace=namespace)
             if cache is not None:
                 cache[namespace][svc_key] = pods
@@ -87,6 +98,7 @@ def get_pod_infos(
 
 
 def get_pods(*, namespace: str, service: Optional[str]) -> List[str]:
+    core_v1 = get_core_v1()
     if service:
         service = core_v1.read_namespaced_service(service, namespace)
         selector = service.spec.selector
