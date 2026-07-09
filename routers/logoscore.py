@@ -134,10 +134,21 @@ def make_call(target: TargetPodInfo, params: dict):
         else:
             result = lclient.call(module, function, func_params)
 
-        result_data["response"] = {
-            "status_code": 200 if result["success"] else 500,
-            "text": json.dumps(result),
-        }
+        if isinstance(result, dict):
+            result_data["response"] = {
+                "status_code": 200 if result["success"] else 500,
+                "text": json.dumps(result),
+            }
+        elif isinstance(result, int):
+            result_data["response"] = {
+                "status_code": result,
+                "text": result,
+            }
+        else:
+            result_data["response"] = {
+                "status_code": 500,
+                "text": result,
+            }
     except Exception as e:
         result_data["exception"] = e
 
